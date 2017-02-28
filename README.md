@@ -1,424 +1,302 @@
-# jQuery BEM
-
-Это инструмент, предназначенный для описания поведения DOM элемента в BEM терминологии.
-[demo](http://rubaxa.github.com/jquery.bem/example.html)
-
-
-## Зачем это нужно?
-
-Каждый из нас, хоть раз, сталкиваться с задачей, в рамках которой
-нужно стилизовать элемент формы или сделать какой-то свой контрол. И тут
-приходится сделать выбор, отправиться в гугл или написать самому. Знакомая
-история, не правда ли?
-
-Мне попадались разные библиотеки, но у них было одно общее - их нужно
-иницализировать. Есть конечно такие, которые делают инициализацию по DOMReady. Но
-что делать с теми элементами, которые мы создали позже, например,
-получив контен через ajax?
-
-Кроме того, инициализация по DOMReady замедляет загрузку страницы. В тоже время,
-велика вероятность, что пользователь не использует стилизованный элемент,
-а он может быть не один. Тогда зачем нужно тратить рессурсы на их инициализацию?
-
-Все эти проблемы меня очень печалили, а ведь хотелось простого -  чтобы
-все работало само и по необходимости, как бы смешно это не звучало :]
-
-Идея сформировалась давно и не нова. Суть её проста - в верстке мы используем
-CSS для определения стиля элемента, описываем селектор и дальше применяем его
-к нужным элементам. Еще есть BEM c блок, элемент и модификатор, осталось
-только описать поведение для этого нужного блока, и дело в шляпе
-
-
-Для себя я сформировал следующие требования:
- * Все необходимые элементы находятся в верстке изначально. Ничего не генирируется скриптом во время исполнения страницы.
- * Инициализация происходит по необходимости, т.е. перед непосредственным  использованием
- * Поведение максимально приближено к нативному
- * Код прозрачен как для верстальшика, так и разработчика
- * Расширямость (возможность написания своих компонентов)
-
-
-В итоге, я получил иструмент, который позволил мне описывать поведение
-элемента для нужного селектора. Если применить класс `b-button`к некоторому элементу,
-то этот элемент будет вести себя, как кнопка, со всеми состояниями
-и событиями присущими кнопке. И самое замечательное, что не нужно беспокоиться о его инициализиции.
-
-
-
-## Пример 1
-Рассмотрим простой пример, вам нужно, чтобы при наведении на элемент, к нему добавлялся
-модификатор `_hover`, а при фокусе (например при помощи tab) `_focus`:
-```html
-<a href="#" class="link" tabindex="1">link</a>
-или
-<span class="link" tabindex="2">...</span>
-```
-```js
-$.bem('link', null, {
-	// static methods and properties
-	mods: 'focus hover'
-});
-```
-
-
-И все, больше никаких телодвижений, теперь если вы наведетесь на элемент с классом "link",
-то получите:
-```html
-<a href="#" class="link link_hover" tabindex="1">link</a>
-```
-
-
-## Пример 2
-Пример посложней, нам нужно сделать счетчик подсчета введенных символов:
-```html
-<div class="b-input">
-	<input value="" type="text" class="b-input__input" />
-	<span class="b-input__length"></span>
-</div>
-```
-```js
-$.bem('b-input', {
-	_onKeyUpCalc: function (){
-		// Работа с элементами, внутри блока
-		this.$('__length').text( this.$('__input').val().length );
-
-		// можно и так
-		// this.$('.b-input__length').text( this.$(':input').val().length );
-	}
-}, {
-	cache: true, // кешировать выборки
-	live: {
-		'focusin focusout': function (evt){
-			// обработчик события "keyup" назначаем в зависимости от фокуса
-			this[evt.type == 'focusin' ? 'on' : 'off']('keyup.calc', '_onKeyUpCalc');
-		}
-	}
-});
-```
-
-
-## b-button
-Вот и настало время написать полноценный элемент-контрол-кнопка
-```html
-<a href="..." class="b-button" tabindex="1">
-	<span class="b-button__label">button</span>
-	<input type="submit" class="b-button__input" />
-</a>
-```
-```js
-$.bem('b-button', {
-	role: 'button',
-
-	onMod: {
-		disabled: function (state){
-			var attrs = { disabled: state };
-
-			// Сохраним url ссылки
-			this._href = state || !this._href ? this.$attr('href') : this._href;
-
-			this
-				.$aria(attrs)
-				.$attr(attrs)
-				.$attr('href', state ? null : this._href) // установить или удалить href, в зависимости от состояния
-			;
-
-			if( state ){
-				// кнопка disabled, так что удалим все модификаторы
-				this.delMod('hover focus press');
-			}
-		},
-
-		press: function (state){
-			this.trigger(state ? 'press' : 'release');
-		},
-
-		hover_no: function (){
-			this.delMod('press');
-		},
-
-		focus: function (state){
-			if( state ){
-				// вешаем событие за пределами элемента
-				this.onOutside('keydown.focus', 'onFocusKeyDown');
-			} else {
-				this.offOutside('keyup.focus keydown.focus');
-			}
-		},
-
-		'*': function (mod, state){
-			if( state && this.isDisabled() ){
-				return	!~'press hover focus'.indexOf(mod);
-			}
-		}
-	},
-
-
-	onClick: function (evt){
-		if( !this.isDisabled ){
-			this.$('__input').click();
-		}
-	},
-
-
-	onFocusKeyDown: function (evt){
-		if( !this.hasOn('keyup.focus') ){
-			this.on('keyup.focus', function (evt){
-				if( this.hasMod('press') ){
-					this.onClick(evt);
-				}
-				this.delMod('press').off('keyup.focus');
-			});
-		}
-
-		var key = evt.keyCode;
-		if( key == 13 || key == 32 ){
-			this.addMod('press');
-			evt.preventDefault();
-		}
-	}
-}, {
-	mods: 'hover press focus',
-	live: {
-		leftclick: 'onClick'
-	}
-});
-```
-
-
-### Наследование:
-```js
-$.bem(['b-button', 'b-submit'], {
-	onMod: {
-		'*': function (mod, state){
-			var ret = this.parent(mod, state);
-			// you logic ...
-		}
-	},
-
-	onFocusKeyDown: function (evt){
-		// you logic ...
-		this.parent(evt); // call parent method
-	}
-});
-```
-
-
-------------------------------------------
-
-
-
-## Готовые элементы
-
-### b-control
- * b-control_hover
- * b-control_focus
- * b-control_press
- * b-control_disabled
-
-
-### b-button  <-  b-control
-```html
-<a href="#" class="b-button">Кнопка</a>
-```
-
-
-### b-checkbox  <-  b-control
- * Space OR Enter — for toggle "checked"
- * b-checkbox_checked
- * b-checkbox_checked_mixed
-
-```html
-<span class="b-checkbox">
-	<span class="b-checkbox__checkmark">
-		<input name="cbx" type="checkbox"/>
-	</span>
-</span>
-```
-
-
-### b-radio  <-  b-checkbox
-```html
-<span class="b-radio">
-	<span class="b-radio__bubble">
-		<input name="radio" type="radio"/>
-	</span>
-</span>
-```
-
-
-### b-list
- * UP/DOWN arrows — move "b-list\_\_item\_hover" between "b-list\_\_item"
- * b-list_focus
- * b-list_active
- * b-list__item_hover
-
-```html
-<ul class="b-list">
-	<li class="b-list__item">item 1</li>
-	<li class="b-list__item">item 2</li>
-</ul>
-```
-
-
-### b-dropdown  <-  b-control
- * ESC — remove "expanded"
- * Space OR Enter — toggle "expanded"
- * UP/DOWN arrows — move "b-dropdown\_\_list\_\_item" between "b-dropdown\_\_list\_\_item\_hover", if before include b-list
- * b-dropdown_expanded
- * b-dropdown__ctrl_focus
- * b-dropdown__ctrl_hover
- * b-dropdown__ctrl_expanded
- * b-dropdown__list_expanded
- * b-dropdown\_\_list\_\_item\_hover — if before define b-list
-
-```html
-<div class="b-dropdown">
-	<div class="b-dropdown__ctrl">text</div>
-	<div class="b-dropdown__list">
-		<div class="b-dropdown__list__item">item 1</div>
-		<div class="b-dropdown__list__item">item 2</div>
-	</div>
-</div>
-```
-
-
-### b-filter
- * b-filter\_\_list\_\_item\_filtered — hidden element
-
-```html
-<div class="b-filter">
-	<input type="text" class="b-filter__input" />
-	<div class="js-filter-item">item 1</div>
-	<div class="js-filter-item">item 2</div>
-</div>
-```
-
-
-
-------------------------------------------
-
-
-
-## API
-
-### Создание описания
-$.bem(className`:String`, methods`:Object`, statics`:Object`);
- * className — название css-класса, для которого описываем поведение
- * methods — методы экземпляра класса
- * statics — статические методы класса
-
-
-### Наследование
-$.bem(className`:String`, extend`:String`, methods`:Object`, statics`:Object`);
- * extend — название того, кого наследуем
-
-
-### Статические методы и свойства
- * .$win`:jQuery` — ссылка на $(window)
- * .$doc`:jQuery` — ссылка на $(document)
- * .lazy`:Boolean = false` — ленивая инициализация
- * .cache`:Boolean = false` — кешировать все выборки
- * .forced`:Boolean = false` — принудительно инициализировать все элементы
- * .live`:Object` — делигируемые события
- * .mods`:Set(hover,focus,press)` — авто-модификаторы (перечисление через пробел)
- * .attrs`:Object` — аттрибуты, которые необходимо выставить DOM-элементу
-
-
-### Свойства класса
- * .self`:BEM` — ссылка на класс, для доступа к статическим методам и свойствам
- * .boundAll`:String` — название методов, через пробел которые нужно привязать к контексту инстанса
- * .debouceAll`:String` — формат записи "methodName:mSec"
- * .cache`:Boolean` — кешировать выборки
- * .forced`:Boolean` — инициализировать объект сразу, после его появления
- * .uniqId`:Number` — уникальный модификатор в рамках BEM-элементов
- * .role`:String` — role-атрибут
- * .$el`:jQuery` — ссылка на jQuery-элемент
- * .el`:HTMLElement` — ссылка на DOM-элемент
- * onMod`:Object` — список слушателей, на установку того или иного модификатора
-
-
-### Методы класса
- * .init() — вызывается при инициализация объекта (@protected)
- * .getId()`:Number` — получить уникальный идентификатор
- * .bound(fn`:Function|String`[, arg1[, argsN]])`:Function` — связать функцию с контекстом класса
- * .debounce(fn`:Function|String`[, delay`:Number`])`:Function` — вызов функции будет произведен только один раз, через N ms
- * .throttle(fn`:Function|String`[, delay`:Number`])`:Function` — вызов функции будет произведен только один раз в N ms
- * .hasMod(mod`:String`[, state`:Mixed`])`:Boolean` — проверить наличие модификатора
- * .addMod(mods`:String`[, state`:Mixed`])`:this` — добавить список модификатор, разделитель пробел
- * .delMod(mods`:String`[, state`:Mixed`])`:this` — убрать модификаторы
- * .toggleMod(mod`:String`[, state`:Mixed`]))`:this` — addMod/delMod
- * .$()`:this.$el` — вернет ссылку на элемент
- * .$(selector`:String`)`:jQuery` — найти все элементы соответствующие css-селектору в this.$el
- * .$(__name`:String`)`:jQuery` — найти элементы в соответствии c BEM именованием
- * .$attr(name`:String`)`:Mixed` — получить значение атрибута
- * .$attr(name`:String`, value`:Mixed`)`:this` — изменить атрибут
- * .$attr(attrs`:Object`)`:this` - изменить атрибуты
- * .$attr(name`:String`, null)`:this` — установка атрибута в null равносильно его удалению
- * .$attr(selector`:String`, attrs`:Object`)`:this` — изменить атрибуты для элементов, соответствующих css-селектору
- * .$aria() - тоже самый $attr, только ко всем атрибутам добавляем префикс "aria-"
- * .$css(), $prop() — аналогично $attr
- * .on(name`:String`, fn`:String|Function`)`:this` — подписаться на событие, this.$el.bind(name, fn)
- * .on(name`:String`, selector`:String`, fn`:String|Function`)`:this` - слушать событие с конкретных элементов, this.$el.delegate(selecotr, name, fn)
- * .off(name`:String`)`:this` — убрать всех слушателей, this.$el.unbind(name)
- * .off(name`:String`, selector`:String`)`:this` — снять слушателя, с конкретных элементов, this.$el.undelegate(selecotr, name)
- * .hasOn(name`:String`)`:Boolean` — проверить наличие подписки на конкретное событие
- * .onOutside(name`:String`, fn`:String|Function`)`:this` — подписаться на событие, за пределами элемента
- * .offOutside(name`:String`)`:this` — убрать слушателя
- * .trigger(name`:String`[, args`:Array`])`:this` — испустить событие
- * .isDisabled()`:Boolean` — проверить элемент на наличие модификатора disabled
- * .destroy() — уничтожить экземпляр класса
- * .destroy(true) — уничтожить + удалить связанные элемент
-
----
-
-### Пример работы с onMod
-```js
-onMod: {
-	size: {
-		S: function (){ /* set: _size_S */ },
-		M: function (){ /* set: _size_M */ },
-		L: function (){ /* set: _size_S */ },
-		'': function (){ /* remove mod */ }
-	},
-
-	size_XL: function (){}
-
-	focus: function (state/**Mixed*/){
-		// (2) after "*"
-	},
-
-	focus_yes: function (){
-		// (3) call after "focus"
-	},
-
-	'*': function (mod/**String*/, state/**Mixed*/){
-		// (1) Call before set modifier
-		// return false, to break
+# jquery.bem
+Предназначен для описания поведения DOM элемента в BEM терминологии c использованием синтаксиса ES6
+
+## Состав пакета
+Библиотека состоит из следующих компонентов:
+* ```BEM.Block```      - абстрактный класс для описания поведения блока
+* ```BEM.Element```      - абстрактный класс для описания поведения элемента
+* ```BEM.Collection``` - базовый класс коллекций блоков
+* ```BEM.Registry```   - объект-хранилище для определенных bem-js блоков  
+* ```BEM.Config```     - экземпляр конфига
+
+## Декларация блока
+JS-реализация блока описывает поведение определённого класса элементов веб-интерфейса. В конкретных интерфейсах каждый 
+блок может быть представлен несколькими экземплярами. Экземпляр блока реализует функциональность своего класса и имеет 
+собственное, независимое состояние. Экземпляры одного блока объединяются в коллекции ```BEM.Collection``` этого блока 
+
+В терминах парадигмы объектно-ориентированного программирования:
+* ***блок*** — класс;
+* ***экземпляр блока*** — экземпляр класса.
+
+Поведение блока описывается в JavaScript-файле блока (myblock.js).
+В соответствии с ООП, вся функциональность блока реализуется модульно в методах блока. 
+Данный класс должен расширять абстрактный класс ```BEM.Block``` 
+
+Методы блока подразделяются на:
+* статические методы и свойства.
+* методы и свойства экземпляра блока;
+
+### Cтатические методы и свойства блока (класса)
+
+#### blockName
+Свойство должно содержать имя блока.
+***Внимание!*** данное свойство должно быть обязательно переопределено.
+
+#### live
+Cвойство может содержать объект со списоком js-событий и их обработчиков, подписка на которые произойдет при 
+инициализации блока. В качестве обработчика могут выступать:
+* ***строка***   - будет вызван одноименный метод у экземпляра блока
+* ***callback*** - будет вызван переданный callback
+
+``` js
+//...
+static get live()
+{
+	return {
+		'click': 'onClick',
 	}
 }
 ```
 
----
-
-### onElemMod
-```js
+#### events
+Свойство может содержать объект со списком событий и их обработчиков. Структура возвращаемого объекта должна быть сделующей:
+``` js
+//...
+static get events()
 {
-	'element': {
-		'modName': function ($el, state, mod, elemName) {
-			// ..
+	return {
+		// список обработчиков при изменении модификаторов блока
+		'onMod': {
+			// данный callback будет вызван каждый раз когда будет изменен модификатор modName не зависимо от его значения
+			'modName': 'onModName',
+			
+			// если необходима подписка на изменения модификатора с определенным значением
+		    'modName2': {
+				'value1': 'onModNameValueOne',
+				'value2': 'onModNameValueTwo',
+		    }
 		},
-
-		'*': function ($el, mod, state, elemName) {
-			// установка любого модификатор
+		
+		// список обработчиков при изменении модификаторов у эл-ов блока
+		'onElemMod': {
+			// Ключ - имя эл-та. Значение - структура аналогичная onMod 
+			'elemName': {
+				'modName': 'onModName'
+			}
 		}
-	},
+	}
+}
+```
 
+#### mods
+Свойство может содержать авто-модификаторы перечисление через пробел
+Возможные значения
+* ***hover***
+* ***focus***
+* ***press***
 
-	// установка любого модификатор, на любой элемент
-	'*': function ($el, elemName, mod, state) {
-		if (this.isDisabled()) { // блок задизаблен
-			// Запрещаем смену модификаторов у элементов
-			return false;
-		}
+При наступлении соответсвующих событий у блока будут автом. изменяться указанные модификаторы
+
+#### attrs
+Свойство может содержать список аттрибутов которые будут установлены при инициализации блока.
+``` js
+//...
+static get events()
+{
+	return {
+		'attrName': 'attrValue',
+	}
+}
+```
+
+#### forced
+Принудительная инициализация всех экземпляров блока на странице.
+По умолчанию инициализация экземпляра блока происходит при наступлении внутри него какого либо пользовательского события
+(навели мышку, кликнули и т.п). По умолчанию ***false***
+
+#### lazy
+Ленивая инициализация.
+Св-во может содержать кол-во милисекунд на которое будет отложена инициализация блока.
+Например при значении св-ва ***1000*** вместе со свойством ```forced``` в значении ***true*** инициализация блока 
+произойдет через секунду после загрузки страницы. По умолчанию ***0***
+
+#### cache
+Кешировать все выборки.
+Если св-во содержит ```true```, то при доступе к дочерним эл-ам все выборки будут сохранены в кеше.
+
+#### $win, $doc, $body
+Содержат ссылку на jQuery объект window, document, document.body соответственно 
+
+#### create([tagName = 'div'])
+Создает новый DOM элемент и возвращает экземпляр блока для этого эл-та
+
+#### getInstance(DomElement node)
+Возвращает экземпляр блока
+
+#### makeCollection()
+Создает новую коллекцию блоков данного типа. 
+Для переопределения базовой коллекции блока нужно переопределить данный метод и в нем вернуть экземпляр своей коллекции коллекции
+
+#### getCollection()
+Метод возвращает коллекцию экземпляров блока на странице. 
+Данная коллекция будет изменяться по мере инициализации новых блоков или их удалении
+
+#### config()
+Возвращает BEM.Config
+
+#### register()
+Метод регистрирует данный блок в реестре блоков. 
+Должен быть обязательно вызван после определения класса.
+``` js
+
+// ...
+class MyBlock extends BEM.Block
+{
+	// ...
+}
+
+MyBlock.register();
+```
+
+### Свойства экземпляра блока (класса)
+* ***self*** - ссылка на класс, для доступа к статическим методам и свойствам (аналог ```static``` в php)
+* ***parent*** - возвращает ссылку на родительский экземпляр блока.
+* ***name*** - название блока/элемента
+* ***$el*** - ссылка на jQuery объект блока/элемента
+* ***el*** - ссылка на DomElement объект блока/элемента
+* ***id*** - уникальный id экземпляра блока
+* ***isBlock***
+* ***isElement***
+
+### Методы экземпляра блока (класса)
+
+#### constructor(node, parms)
+Конструктор класса. На вход принимает 2 параметра
+* ***node***  - DomElement блока/элемента
+* ***parms.cache*** - кэшировать выборки или нет
+* ***parms.lazy***  - ленивая инициализация
+* ***parms.role***  - ...
+
+Параметр parms может быть указан в аттрибуте onclick ноды.
+
+#### destroy([absolute = true])
+Метод удаляет экземпляр блока. Если переданный параметр имеет значение ***true***, то вместе с удалением js объекта 
+будет удален и html элемент ассоциированный с ним. По умолчанию ***true***
+ 
+#### onInit()
+Метод вызывается при инициализации экземпляра блока
+
+#### addMod(name[, state])
+Добавляет модификатор ***name*** со значением ***state***
+
+#### delMod(name[, state])
+Удаляет модификатор ***name*** со значением ***state***
+
+#### toggleMod(name[, state])
+Добавляет/удаляет модификатор ***name*** со значением ***state***
+
+#### hasMod(name[, state])
+Проверяет наличие модификатора ***name*** со значением ***state***
+
+#### elem(name)
+Возвращает первый ```BEM.Element``` js элемент блока по его имени из коллекции эл-ов
+
+#### elems(name)
+Возвращает коллекцию ```BEM.Collection``` js элементов блока
+
+#### asBlock(blockName)
+Если в верстке используются миксины bem-блоков, то с помощью этого метода можно получить эзлемпляр миксованного блока
+``` html
+<div id="mixin-block" class="b-block-1 b-block-2">
+</div>
+```
+
+``` js
+// ...
+// переменная содержит экзепляр блока b-block-1
+let block1 = MyBlock1.getInstance(node);
+
+// переключились на другой блок миксина
+let block2 = block1.asBlock('b-block-2');
+```
+
+#### $(selector[, force])
+Возвращает jQuery объект выборки по селектору внутри блока. При переданом параметре ```force = true``` 
+при поиске результата не будет использован кеш
+
+#### $elems(name)
+Возвращает jQuery объект коллекции элементов блоков
+
+#### $elem(name)
+Возвращает jQuery объект первый из коллекции элементов блоков
+
+### Наследование блока
+Одна и та же функциональность может быть востребована в нескольких блоках проекта. Например, разные блоки могут 
+обращаться за данными к бэкенду, используя AJAX, или совершать однотипные операции с DOM-деревом и т.д. Чтобы избежать 
+ненужных повторов в коде, общую функциональность можно инкапсулировать в виде модулей, а затем добавлять к блокам.
+
+В этом случае создаваемый блок объявляется как наследник существующего. Для этого нужно, так же как и в php просто 
+расширить класс существующего блока.
+Для доступа к методам и свойствам родителького блока нужно использовать ключевое слово `super` (аналог parent в php)
+
+``` js
+import BEM from jquery.bem
+
+class ParentBlock extends BEM.Block
+{
+	// ...
+	foo()
+	{
+		// ...
+	}
+}
+
+class MyBlock extends ParentBlock
+{
+	// ...
+	foo()
+	{
+		// вызываем родительский метод
+		super.foo.apply(this, arguments);
+		
+		// ...
+	}
+}
+```
+
+## Коллекции экземпляров блоков
+При инициализации экземпляры блока одного типа помещаются коллекции ```BEM.Collection```
+
+Получить коллекцию можно с помощью статического метода ```getCollection``` у блока.
+``` js
+import MyBlock from myblock;
+
+let items = MyBlock.getCollection()
+```
+
+BEM.Collection реализует интерфейс ```Array```
+в связи с чем для работы доступны все методы ```Array.prototype.*``` [ссылка](https://developer.mozilla.org/ru/docs/Web/JavaScript/Reference/Global_Objects/Array),
+
+Так же для удобства использования есть методы позволяющие производить операции над всеми элементами сразу:
+* ***addMod(name[, state])***
+* ***delMod(name[, state])***
+* ***toggleMod(name, state)***
+* ***$el()***
+* ***byMod(name[, state])*** - возвращает коллекцию с блоками отфильтрованными по модификатору
+* ***invoke(fn, ...args)*** - вызывает метод ```fn``` с аргументами ***args*** у каждого экземпляра коллекции 
+* ***invokeArray(fn, args)*** - аналогично методу ```invoke```, за исключением того, что аргументы передаются в виде массива 
+
+### Переопределение коллекции
+Для переопределения коллекции необходимо создать свой класс коллекций, который бы расширял базовый ```BEM.Collection```
+``` js
+// ...
+class MyCollection extends BEM.Collection
+{
+	otherMethod()
+	{
+		// ...
+	}
+}
+```
+
+Далее у блока необходимо переопределить статический метод ```makeCollection``` в котором вернуть экземпляр своей коллекции
+``` js
+class MyBlock extends BEM.Block
+{
+	// ...
+	static makeCollection()
+	{
+		return new MyCollection.make();
 	}
 }
 ```
